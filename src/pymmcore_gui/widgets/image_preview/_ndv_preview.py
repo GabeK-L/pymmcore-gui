@@ -13,8 +13,7 @@ if TYPE_CHECKING:
     from pymmcore_plus import CMMCorePlus
 
 
-# Live preview only needs the most recent frame. Keep the local viewer buffer
-# tiny to avoid large memory usage on high-resolution cameras.
+# Live preview only needs the most recent frame.
 BUFFER_SIZE = 1
 
 # Camera orientation correction:
@@ -22,7 +21,7 @@ BUFFER_SIZE = 1
 # 1 = 90° counter-clockwise
 # 2 = 180°
 # 3 = 90° clockwise
-ROTATION = 0
+ROTATION = 1
 
 
 class NDVPreview(ImagePreviewBase):
@@ -49,10 +48,7 @@ class NDVPreview(ImagePreviewBase):
         layout.addWidget(qwdg)
 
     def append(self, data: np.ndarray) -> None:
-        """Add a new camera frame to the viewer."""
-
-        if ROTATION:
-            data = np.ascontiguousarray(np.rot90(data, k=ROTATION))
+        """Append a camera frame to the NDV viewer."""
 
         needs_setup = self._buffer is None
 
@@ -60,6 +56,12 @@ class NDVPreview(ImagePreviewBase):
             self._init_buffer()
 
         if self._buffer is not None:
+
+            if ROTATION:
+                data = np.ascontiguousarray(
+                    np.rot90(data, k=ROTATION)
+                )
+
             self._buffer.append(data)
 
             if needs_setup:
@@ -79,7 +81,7 @@ class NDVPreview(ImagePreviewBase):
         return self._core_dtype
 
     def _get_core_dtype_shape(self) -> tuple[str, tuple[int, ...]] | None:
-        """Return the rotated image shape expected by the viewer buffer."""
+        """Return buffer shape after rotation."""
 
         if (core := self._mmc) is not None:
 
@@ -88,7 +90,7 @@ class NDVPreview(ImagePreviewBase):
                 img_width = core.getImageWidth()
                 img_height = core.getImageHeight()
 
-                # A 90° rotation swaps width and height
+                # Rotation swaps dimensions for rectangular ROIs
                 if ROTATION in (1, 3):
                     img_width, img_height = img_height, img_width
 
@@ -97,7 +99,7 @@ class NDVPreview(ImagePreviewBase):
                 else:
                     shape = (img_height, img_width)
 
-                # Coerce packed bits to byte-aligned numpy dtype
+                # Convert packed bit depths to numpy-compatible dtype
                 if bits <= 8:
                     bits = 8
                 elif bits <= 16:
@@ -117,7 +119,7 @@ class NDVPreview(ImagePreviewBase):
 
         self._core_dtype = core_dtype
 
-        # RGB images have 3 dimensions: height, width, channels
+        # RGB images have height, width, channels
         self._is_rgb = len(core_dtype[1]) == 3
 
         self._buffer = RingBuffer(
@@ -126,11 +128,10 @@ class NDVPreview(ImagePreviewBase):
         )
 
     def _apply_viewer_settings(self) -> None:
-        """Assign buffer to viewer and configure display."""
+        """Assign buffer and configure NDV display."""
 
         self._viewer.data = self._buffer
 
-        # Display image axes
         self._viewer.display_model.visible_axes = (1, 2)
 
         if self._is_rgb:
@@ -145,7 +146,11 @@ class NDVPreview(ImagePreviewBase):
             self._viewer.display_model.channel_axis = None
 
     def _setup_viewer(self) -> None:
-        """Create buffer and configure viewer."""
+        """Recreate buffer and configure viewer."""
+
+        # Clear old buffer after ROI changes
+        self._buffer = None
+        self._core_dtype = None
 
         self._init_buffer()
 
