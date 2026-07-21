@@ -40,6 +40,9 @@ class NDVPreview(ImagePreviewBase):
         layout.addWidget(qwdg)
 
     def append(self, data: np.ndarray) -> None:
+        # Rotate camera image before display
+        data = np.ascontiguousarray(np.rot90(data, k=1))
+    
         needs_setup = self._buffer is None
         if needs_setup:
             self._init_buffer()
