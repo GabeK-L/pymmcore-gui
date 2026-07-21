@@ -22,7 +22,7 @@ BUFFER_SIZE = 1
 # 1 = 90° counter-clockwise
 # 2 = 180°
 # 3 = 90° clockwise
-ROTATION = 1
+ROTATION = o
 
 
 class NDVPreview(ImagePreviewBase):
