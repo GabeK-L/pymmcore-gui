@@ -40,9 +40,6 @@ class NDVPreview(ImagePreviewBase):
         layout.addWidget(qwdg)
 
     def append(self, data: np.ndarray) -> None:
-        # Rotate camera image before display
-        data = np.ascontiguousarray(np.rot90(data, k=1))
-    
         needs_setup = self._buffer is None
         if needs_setup:
             self._init_buffer()
@@ -91,6 +88,7 @@ class NDVPreview(ImagePreviewBase):
         """Assign the buffer to the viewer and configure display settings."""
         self._viewer.data = self._buffer
         self._viewer.display_model.visible_axes = (1, 2)
+        self._viewer.display_model.rotation = 90
         if self._is_rgb:  # RGB
             self._viewer.display_model.channel_axis = 3
             self._viewer.display_model.channel_mode = ndv.models.ChannelMode.RGBA
