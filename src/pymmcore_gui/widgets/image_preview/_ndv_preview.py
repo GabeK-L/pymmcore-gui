@@ -17,6 +17,22 @@ if TYPE_CHECKING:
 BUFFER_SIZE = 1
 
 
+# Camera display orientation
+# (2, 1) corrects a camera physically mounted 90 degrees
+DISPLAY_AXES = (2, 1)
+
+
+# Mirror correction:
+# None = no flip
+# 0 = flip vertically
+# 1 = flip horizontally
+#
+# Try changing this if the image is mirrored.
+FLIP_AXIS = 0
+# FLIP_AXIS = 0
+# FLIP_AXIS = 1
+
+
 class NDVPreview(ImagePreviewBase):
     def __init__(
         self,
@@ -25,7 +41,11 @@ class NDVPreview(ImagePreviewBase):
         *,
         use_with_mda: bool = False,
     ):
-        super().__init__(parent, mmcore, use_with_mda=use_with_mda)
+        super().__init__(
+            parent,
+            mmcore,
+            use_with_mda=use_with_mda,
+        )
 
         self._viewer = ndv.ArrayViewer()
         self._buffer: RingBuffer | None = None
@@ -47,6 +67,12 @@ class NDVPreview(ImagePreviewBase):
             self._init_buffer()
 
         if self._buffer is not None:
+
+            # Correct mirror orientation if needed
+            if FLIP_AXIS is not None:
+                data = np.flip(data, axis=FLIP_AXIS)
+                data = np.ascontiguousarray(data)
+
             self._buffer.append(data)
 
             if needs_setup:
@@ -78,7 +104,7 @@ class NDVPreview(ImagePreviewBase):
                 else:
                     shape = (img_height, img_width)
 
-                # Coerce packed bits to byte-aligned numpy dtype
+                # Convert packed bits to byte-aligned numpy dtype
                 if bits <= 8:
                     bits = 8
                 elif bits <= 16:
@@ -96,6 +122,7 @@ class NDVPreview(ImagePreviewBase):
 
         self._core_dtype = core_dtype
 
+        # RGB images have height, width, channels
         self._is_rgb = len(core_dtype[1]) == 3
 
         self._buffer = RingBuffer(
@@ -106,8 +133,8 @@ class NDVPreview(ImagePreviewBase):
     def _apply_viewer_settings(self) -> None:
         self._viewer.data = self._buffer
 
-        # Swap X/Y display axes (90 degree camera orientation correction test)
-        self._viewer.display_model.visible_axes = (2, 1)
+        # Correct 90 degree camera orientation
+        self._viewer.display_model.visible_axes = DISPLAY_AXES
 
         if self._is_rgb:
             self._viewer.display_model.channel_axis = 3
@@ -121,7 +148,7 @@ class NDVPreview(ImagePreviewBase):
             self._viewer.display_model.channel_axis = None
 
     def _setup_viewer(self) -> None:
-        # Recreate buffer after camera configuration/ROI changes
+        # Recreate buffer after camera ROI changes
         self._buffer = None
         self._core_dtype = None
 
