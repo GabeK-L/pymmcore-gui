@@ -17,6 +17,13 @@ if TYPE_CHECKING:
 # tiny to avoid large memory usage on high-resolution cameras.
 BUFFER_SIZE = 1
 
+# Camera orientation correction:
+# 0 = no rotation
+# 1 = 90° counter-clockwise
+# 2 = 180°
+# 3 = 90° clockwise
+ROTATION = 1
+
 
 class NDVPreview(ImagePreviewBase):
     def __init__(
@@ -27,11 +34,13 @@ class NDVPreview(ImagePreviewBase):
         use_with_mda: bool = False,
     ):
         super().__init__(parent, mmcore, use_with_mda=use_with_mda)
+
         self._viewer = ndv.ArrayViewer()
         self._buffer: RingBuffer | None = None
         self._core_dtype: tuple[str, tuple[int, ...]] | None = None
         self._is_rgb: bool = False
         self.process_events_on_update = True
+
         qwdg = self._viewer.widget()
         qwdg.setParent(self)
 
@@ -40,65 +49,106 @@ class NDVPreview(ImagePreviewBase):
         layout.addWidget(qwdg)
 
     def append(self, data: np.ndarray) -> None:
+        """Add a new camera frame to the viewer."""
+
+        if ROTATION:
+            data = np.ascontiguousarray(np.rot90(data, k=ROTATION))
+
         needs_setup = self._buffer is None
+
         if needs_setup:
             self._init_buffer()
+
         if self._buffer is not None:
             self._buffer.append(data)
+
             if needs_setup:
                 self._apply_viewer_settings()
-            self._viewer.display_model.current_index.update({0: len(self._buffer) - 1})
+
+            self._viewer.display_model.current_index.update(
+                {0: len(self._buffer) - 1}
+            )
+
             self._viewer.data_wrapper.data_changed.emit()
+
             if self.process_events_on_update:
-                QApplication.processEvents()
+                QApplication.process_events()
 
     @property
     def dtype_shape(self) -> tuple[str, tuple[int, ...]] | None:
         return self._core_dtype
 
     def _get_core_dtype_shape(self) -> tuple[str, tuple[int, ...]] | None:
+        """Return the rotated image shape expected by the viewer buffer."""
+
         if (core := self._mmc) is not None:
+
             if bits := core.getImageBitDepth():
+
                 img_width = core.getImageWidth()
                 img_height = core.getImageHeight()
+
+                # A 90° rotation swaps width and height
+                if ROTATION in (1, 3):
+                    img_width, img_height = img_height, img_width
+
                 if core.getNumberOfComponents() > 1:
-                    shape: tuple[int, ...] = (img_height, img_width, 3)
+                    shape = (img_height, img_width, 3)
                 else:
                     shape = (img_height, img_width)
-                # coerce packed bits to byte-aligned numpy dtype
-                # (this is how the data will actually come from pymmcore)
+
+                # Coerce packed bits to byte-aligned numpy dtype
                 if bits <= 8:
                     bits = 8
                 elif bits <= 16:
                     bits = 16
                 elif bits <= 32:
                     bits = 32
+
                 return (f"uint{bits}", shape)
+
         return None
 
     def _init_buffer(self) -> None:
-        """Create the ring buffer (without assigning to viewer yet)."""
+        """Create the ring buffer."""
+
         if (core_dtype := self._get_core_dtype_shape()) is None:
-            return  # pragma: no cover
+            return
+
         self._core_dtype = core_dtype
-        self._is_rgb = core_dtype[1][-1] == 3
-        self._buffer = RingBuffer(max_capacity=BUFFER_SIZE, dtype=core_dtype)
+
+        # RGB images have 3 dimensions: height, width, channels
+        self._is_rgb = len(core_dtype[1]) == 3
+
+        self._buffer = RingBuffer(
+            max_capacity=BUFFER_SIZE,
+            dtype=core_dtype,
+        )
 
     def _apply_viewer_settings(self) -> None:
-        """Assign the buffer to the viewer and configure display settings."""
+        """Assign buffer to viewer and configure display."""
+
         self._viewer.data = self._buffer
+
+        # Display image axes
         self._viewer.display_model.visible_axes = (1, 2)
-        self._viewer.display_model.rotation = 90
-        if self._is_rgb:  # RGB
+
+        if self._is_rgb:
             self._viewer.display_model.channel_axis = 3
-            self._viewer.display_model.channel_mode = ndv.models.ChannelMode.RGBA
+            self._viewer.display_model.channel_mode = (
+                ndv.models.ChannelMode.RGBA
+            )
         else:
-            self._viewer.display_model.channel_mode = ndv.models.ChannelMode.GRAYSCALE
+            self._viewer.display_model.channel_mode = (
+                ndv.models.ChannelMode.GRAYSCALE
+            )
             self._viewer.display_model.channel_axis = None
 
     def _setup_viewer(self) -> None:
-        """Create the buffer, assign to viewer, and configure display."""
+        """Create buffer and configure viewer."""
+
         self._init_buffer()
+
         if self._buffer is not None:
             self._apply_viewer_settings()
 
@@ -106,5 +156,6 @@ class NDVPreview(ImagePreviewBase):
         self._setup_viewer()
 
     def _on_roi_set(self) -> None:
-        """Reconfigure the viewer when a Camera ROI is set."""
+        """Reconfigure viewer after camera ROI changes."""
+
         self._setup_viewer()
